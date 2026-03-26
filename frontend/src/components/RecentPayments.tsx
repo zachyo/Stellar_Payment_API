@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import PaymentDetailModal from "@/components/PaymentDetailModal";
 import {
   useHydrateMerchantStore,
@@ -36,6 +36,9 @@ export default function RecentPayments() {
   const [, setTotalCount] = useState(0);
   const [selectedPayment, setSelectedPayment] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
   const apiKey = useMerchantApiKey();
   const hydrated = useMerchantHydrated();
 
@@ -97,53 +100,6 @@ export default function RecentPayments() {
   const closeModal = () => {
     setIsModalOpen(false);
     setSelectedPayment(null);
-  };
-
-  const allPaymentIds = payments.map((payment) => payment.id);
-  const selectedCount = selectedIds.size;
-  const allSelected = allPaymentIds.length > 0 && selectedCount === allPaymentIds.length;
-  const someSelected = selectedCount > 0 && !allSelected;
-
-  useEffect(() => {
-    if (selectAllRef.current) {
-      selectAllRef.current.indeterminate = someSelected;
-    }
-  }, [someSelected]);
-
-  const toggleBulkMode = () => {
-    setBulkMode((prev) => {
-      const next = !prev;
-      if (!next) {
-        setSelectedIds(new Set());
-      }
-      return next;
-    });
-  };
-
-  const toggleSelection = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  const toggleSelectAll = () => {
-    if (allSelected) {
-      setSelectedIds(new Set());
-      return;
-    }
-    setSelectedIds(new Set(allPaymentIds));
-  };
-
-  const cancelSelected = () => {
-    if (selectedCount === 0) return;
-    setPayments((prev) => prev.filter((payment) => !selectedIds.has(payment.id)));
-    setSelectedIds(new Set());
   };
 
   if (loading) {
