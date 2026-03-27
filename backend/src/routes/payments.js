@@ -9,6 +9,7 @@ import { paymentSessionZodSchema } from "../lib/request-schemas.js";
 import { createCreatePaymentRateLimit } from "../lib/create-payment-rate-limit.js";
 import { sendWebhook } from "../lib/webhooks.js";
 import { resolveBrandingConfig } from "../lib/branding.js";
+import { sendReceiptEmail } from "../lib/email.js";
 
 const createPaymentRateLimit = createCreatePaymentRateLimit();
 
@@ -19,6 +20,7 @@ const defaultVerifyPaymentRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
 
 function createPaymentsRouter({
   verifyPaymentRateLimit = defaultVerifyPaymentRateLimit,
@@ -272,7 +274,7 @@ function createPaymentsRouter({
         const { data, error } = await supabase
           .from("payments")
           .select(
-            "id, amount, asset, asset_issuer, recipient, status, tx_id, memo, memo_type, webhook_url, merchants(webhook_secret)",
+            "id, amount, asset, asset_issuer, recipient, status, tx_id, memo, memo_type, webhook_url, merchants(webhook_secret, notification_email, business_name)",
           )
           .eq("id", req.params.id)
           .maybeSingle();
@@ -332,6 +334,15 @@ function createPaymentsRouter({
           },
           merchantSecret,
         );
+        sendReceiptEmail({
+          to: data.merchants?.notification_email,
+          businessName: data.merchants?.business_name || "Merchant",
+          amount: data.amount,
+          asset: data.asset,
+          recipient: data.recipient,
+          txId: match.transaction_hash,
+          paymentId: data.id,
+        });
 
         if (!webhookResult.ok && !webhookResult.skipped) {
           console.warn("Webhook failed", webhookResult);
