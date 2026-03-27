@@ -98,6 +98,7 @@ router.post("/register-merchant", validateRequest({ body: registerMerchantZodSch
       .from("merchants")
       .select("id")
       .eq("email", email)
+      .is("deleted_at", null)
       .maybeSingle();
 
     if (existing) {
@@ -333,6 +334,48 @@ router.get("/merchant-profile", async (req, res, next) => {
         merchant_settings: resolveMerchantSettings(data.merchant_settings),
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * @swagger
+ * /api/merchant-profile:
+ *   delete:
+ *     summary: Soft-delete the authenticated merchant's account
+ *     tags: [Merchants]
+ *     security:
+ *       - ApiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Account successfully deleted
+ *       500:
+ *         description: Server error
+ */
+router.delete("/merchant-profile", async (req, res, next) => {
+  try {
+    const ts = Date.now();
+    
+    // Obfuscate unique fields so they can re-register if they want
+    const newEmail = `deleted_${ts}_${req.merchant.email}`;
+    const newApiKey = `deleted_${ts}_${req.merchant.api_key}`;
+
+    const { error } = await supabase
+      .from("merchants")
+      .update({
+        deleted_at: new Date().toISOString(),
+        email: newEmail,
+        api_key: newApiKey
+      })
+      .eq("id", req.merchant.id);
+
+    if (error) {
+      error.status = 500;
+      throw error;
+    }
+
+    res.json({ message: "Account successfully deleted" });
   } catch (err) {
     next(err);
   }
