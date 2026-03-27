@@ -2,8 +2,8 @@ import cors from "cors";
 import "dotenv/config";
 import express from "express";
 import morgan from "morgan";
-import swaggerJsdoc from "swagger-jsdoc";
 import swaggerUi from "swagger-ui-express";
+import { swaggerDocument } from './swagger.js';
 import { ZodError } from "zod";
 import createPaymentsRouter from "./routes/payments.js";
 import merchantsRouter from "./routes/merchants.js";
@@ -48,8 +48,6 @@ const swaggerSpec = swaggerJsdoc({
   },
   apis: ["./src/routes/*.js"],
 });
-
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS
   ? process.env.CORS_ALLOWED_ORIGINS.split(",").map((o) => o.trim())
@@ -130,6 +128,7 @@ app.use("/api", createPaymentsRouter({ verifyPaymentRateLimit }));
 app.use("/api", merchantsRouter);
 app.use("/api", metricsRouter);
 app.use("/api", auditRouter);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 app.use((err, req, res, next) => {
   if (err instanceof ZodError) {

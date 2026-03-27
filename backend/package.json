@@ -12,6 +12,7 @@
     "migrate:rollback": "knex migrate:rollback --knexfile knexfile.js"
   },
   "devDependencies": {
+    "@types/swagger-ui-express": "~4.1.8",
     "nodemon": "^3.1.14",
     "vitest": "^2.0.0"
   },
@@ -31,6 +32,7 @@
     "stellar-sdk": "^12.1.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "zod-to-json-schema": "~3.25.1"
   }
 }
