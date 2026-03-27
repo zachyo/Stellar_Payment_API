@@ -9,13 +9,31 @@ const HORIZON_URL =
     : "https://horizon-testnet.stellar.org");
 
 const server = new StellarSdk.Horizon.Server(HORIZON_URL);
+const HORIZON_HEALTH_TIMEOUT_MS = 2_000;
 
 export async function isHorizonReachable() {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    HORIZON_HEALTH_TIMEOUT_MS,
+  );
+
   try {
-    await server.ledgers().order("desc").limit(1).call();
-    return true;
+    const response = await fetch(HORIZON_URL, {
+      method: "GET",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    // Treat rate limiting as reachable so transient Horizon throttling
+    // doesn't fail the entire API health check.
+    return response.ok || response.status === 429;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
