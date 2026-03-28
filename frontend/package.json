@@ -8,8 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "test:e2e": "playwright test",
-    "test:visual": "playwright test tests/e2e/vrt.spec.ts --project=chromium",
-    "test:visual:update": "playwright test tests/e2e/vrt.spec.ts --project=chromium --update-snapshots"
+    "test:e2e:update": "playwright test --update-snapshots",
+    "test:visual": "playwright test tests/e2e/checkout.visual.spec.ts tests/e2e/create-payment.visual.spec.ts",
+    "test:visual:update": "playwright test tests/e2e/checkout.visual.spec.ts tests/e2e/create-payment.visual.spec.ts --update-snapshots"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
@@ -20,6 +21,7 @@
     "@walletconnect/types": "^2.23.8",
     "boring-avatars": "^2.0.4",
     "canvas-confetti": "^1.9.4",
+    "confetti": "^3.0.4",
     "event-source-polyfill": "^1.0.31",
     "framer-motion": "^12.38.0",
     "marked": "^17.0.5",

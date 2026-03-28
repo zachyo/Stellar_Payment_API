@@ -8,6 +8,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { usePayment } from "@/lib/usePayment";
 import { useAssetMetadata } from "@/lib/useAssetMetadata";
 import { createReceiptPdf } from "@/lib/receipt-pdf";
+import CheckoutQrModal from "@/components/CheckoutQrModal";
 import CopyButton from "@/components/CopyButton";
 import WalletSelector from "@/components/WalletSelector";
 import toast from "react-hot-toast";
@@ -16,6 +17,7 @@ import "react-loading-skeleton/dist/skeleton.css";
 import { QRCodeSVG } from "qrcode.react";
 import { localeToLanguageTag } from "@/i18n/config";
 import Confetti from "react-confetti";
+import { Modal } from "@/components/ui/Modal";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -76,6 +78,17 @@ interface PathQuote {
   destination_amount: string;
   path: Array<{ asset_code: string; asset_issuer: string | null }>;
   slippage: number;
+}
+
+interface NetworkFeeResponse {
+  network_fee: {
+    network: string;
+    horizon_url: string;
+    operation_count: number;
+    stroops: number;
+    xlm: string;
+    last_ledger_base_fee: number;
+  };
 }
 
 // ─── Branding defaults ───────────────────────────────────────────────────────
@@ -373,14 +386,23 @@ export default function PaymentPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showRawIntent, setShowRawIntent] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
+  const [isPayModalOpen, setIsPayModalOpen] = useState(false);
+  const [networkFee, setNetworkFee] =
+    useState<NetworkFeeResponse["network_fee"] | null>(null);
+  const [networkFeeLoading, setNetworkFeeLoading] = useState(false);
+  const [networkFeeError, setNetworkFeeError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (payment && (payment.status === "confirmed" || payment.status === "completed")) {
+    if (
+      payment &&
+      (payment.status === "confirmed" || payment.status === "completed")
+    ) {
       setShowConfetti(true);
     }
-  }, [payment?.status]);
+  }, [payment]);
 
   // Path payment state
   const [usePathPayment, setUsePathPayment] = useState(false);
@@ -439,7 +461,9 @@ export default function PaymentPage() {
     eventSource.addEventListener("payment.confirmed", (event) => {
       try {
         const data = JSON.parse(event.data);
-        setPayment((prev) => (prev ? { ...prev, status: data.status, tx_id: data.tx_id } : null));
+        setPayment((prev) =>
+          prev ? { ...prev, status: data.status, tx_id: data.tx_id } : null,
+        );
         toast.success(t("paymentConfirmed") || "Payment confirmed!");
         eventSource.close();
       } catch (err) {
@@ -458,7 +482,9 @@ export default function PaymentPage() {
   // ── Polling fallback (only if not confirmed) ──────────────────────────────
   useEffect(() => {
     if (loading || !payment) return;
-    const settled = ["confirmed", "completed", "failed"].includes(payment.status);
+    const settled = ["confirmed", "completed", "failed"].includes(
+      payment.status,
+    );
     if (settled) return;
 
     // Use a longer interval for polling fallback (e.g., 10s)
@@ -529,9 +555,47 @@ export default function PaymentPage() {
     };
   }, [payment, activeProvider, paymentId]);
 
+  useEffect(() => {
+    if (!isPayModalOpen) return;
+
+    const controller = new AbortController();
+    const loadNetworkFee = async () => {
+      setNetworkFeeLoading(true);
+      setNetworkFeeError(null);
+
+      try {
+        const res = await fetch(`${API_URL}/api/network-fee`, {
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          throw new Error(t("networkFeeUnavailable"));
+        }
+
+        const data = (await res.json()) as NetworkFeeResponse;
+        setNetworkFee(data.network_fee);
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === "AbortError") return;
+        setNetworkFee(null);
+        setNetworkFeeError(t("networkFeeUnavailable"));
+      } finally {
+        setNetworkFeeLoading(false);
+      }
+    };
+
+    loadNetworkFee();
+
+    return () => controller.abort();
+  }, [isPayModalOpen, t]);
+
   // ── Pay handler ───────────────────────────────────────────────────────────
-  const handlePay = async () => {
+  const handlePay = () => {
+    setIsPayModalOpen(true);
+  };
+
+  const handleConfirmPay = async () => {
     if (!payment) return;
+    setIsPayModalOpen(false);
     setActionError(null);
 
     try {
@@ -646,6 +710,7 @@ export default function PaymentPage() {
   const isSettled =
     payment.status === "confirmed" || payment.status === "completed";
   const isFailed = payment.status === "failed";
+  const paymentIntentUri = buildSep7Uri(payment);
 
   // Resolve branding once — used by both the theme style and the header component
   const branding = resolveBranding(payment.branding_config || {});
@@ -653,7 +718,17 @@ export default function PaymentPage() {
   return (
     <>
       {showConfetti && (
-        <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", zIndex: 100, pointerEvents: "none" }}>
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            zIndex: 100,
+            pointerEvents: "none",
+          }}
+        >
           <Confetti recycle={false} numberOfPieces={400} />
         </div>
       )}
@@ -738,7 +813,7 @@ export default function PaymentPage() {
               </p>
               <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white p-4">
                 <QRCodeSVG
-                  value={payment.recipient}
+                  value={paymentIntentUri}
                   size={160}
                   level="M"
                   bgColor="#ffffff"
@@ -748,6 +823,26 @@ export default function PaymentPage() {
               <p className="text-center text-xs text-slate-500">
                 {t("scanDescription")}
               </p>
+              <button
+                type="button"
+                onClick={() => setShowQrModal(true)}
+                className="inline-flex items-center justify-center gap-2 self-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm12 3v3m0 0h3m-3 0h-3m3-6v-3m0 3h3m-9 6h6v-6h-6z"
+                  />
+                </svg>
+                {t("openQrModal")}
+              </button>
               <div className="sm:hidden">
                 <button
                   type="button"
@@ -760,12 +855,9 @@ export default function PaymentPage() {
                 {showRawIntent && (
                   <div className="mt-3 flex items-start gap-2 rounded-lg border border-white/10 bg-black/40 p-3">
                     <code className="flex-1 break-all font-mono text-[11px] text-slate-200">
-                      {buildSep7Uri(payment)}
+                      {paymentIntentUri}
                     </code>
-                    <CopyButton
-                      text={buildSep7Uri(payment)}
-                      className="mt-0.5"
-                    />
+                    <CopyButton text={paymentIntentUri} className="mt-0.5" />
                   </div>
                 )}
               </div>
@@ -839,7 +931,7 @@ export default function PaymentPage() {
                                 {
                                   minimumFractionDigits: 0,
                                   maximumFractionDigits: 7,
-                                }
+                                },
                               )}{" "}
                               {pathQuote.source_asset}
                             </p>
@@ -943,7 +1035,7 @@ export default function PaymentPage() {
                       process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
                       "Test SDF Network ; September 2015"
                     }
-                    onConnected={() => { }}
+                    onConnected={() => {}}
                   />
                 )}
               </div>
@@ -997,6 +1089,63 @@ export default function PaymentPage() {
           </div>
         </div>
       </main>
+      <CheckoutQrModal
+        isOpen={showQrModal}
+        onClose={() => setShowQrModal(false)}
+        qrValue={paymentIntentUri}
+        paymentId={payment.id}
+      />
+      <Modal
+        isOpen={isPayModalOpen}
+        onClose={() => {
+          if (!isProcessing) {
+            setIsPayModalOpen(false);
+          }
+        }}
+        title={t("reviewPaymentTitle")}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+              {t("completePayment")}
+            </p>
+            <p className="mt-2 text-2xl font-bold text-white">
+              {usePathPayment && pathQuote
+                ? `${pathQuote.send_max} ${pathQuote.source_asset}`
+                : `${payment.amount.toLocaleString(locale, {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 7,
+                  })} ${payment.asset.toUpperCase()}`}
+            </p>
+            <p className="mt-3 text-sm text-slate-300">
+              {networkFeeLoading
+                ? t("loadingNetworkFee")
+                : networkFee
+                  ? t("networkFeeLabel", { amount: networkFee.xlm })
+                  : networkFeeError ?? t("networkFeeUnavailable")}
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setIsPayModalOpen(false)}
+              className="flex h-11 flex-1 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-4 text-sm font-semibold text-white transition hover:bg-white/10"
+            >
+              {t("cancel")}
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmPay}
+              disabled={isProcessing}
+              className="flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold text-black transition disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ backgroundColor: "var(--checkout-primary)" }}
+            >
+              {t("confirmPayment")}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }

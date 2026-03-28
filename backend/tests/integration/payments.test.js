@@ -214,9 +214,21 @@ vi.mock("../../src/lib/supabase.js", () => {
  * Stellar mock — controls whether findMatchingPayment returns a match.
  */
 const mockFindMatchingPayment = vi.fn().mockResolvedValue(null);
+const mockGetNetworkFeeStats = vi.fn().mockResolvedValue({
+  network: "testnet",
+  horizonUrl: "https://horizon-testnet.stellar.org",
+  operationCount: 1,
+  lastLedgerBaseFee: 100,
+  recommendedFeeStroops: 100,
+  totalFeeStroops: 100,
+  totalFeeXlm: "0.0000100",
+  feeCharged: { mode: "100", p50: "100" },
+  maxFee: { mode: "100" },
+});
 
 vi.mock("../../src/lib/stellar.js", () => ({
   findMatchingPayment: (...args) => mockFindMatchingPayment(...args),
+  getNetworkFeeStats: (...args) => mockGetNetworkFeeStats(...args),
   isHorizonReachable: vi.fn(async () => true),
   resolveAsset: vi.fn(),
   createRefundTransaction: vi.fn(),
@@ -228,22 +240,28 @@ vi.mock("../../src/lib/stellar.js", () => ({
 /*
  * Redis mock — noop cache so the routes that read/write cache don't explode.
  */
+const redisMemory = new Map();
 vi.mock("../../src/lib/redis.js", () => ({
   connectRedisClient: vi.fn(async () => ({
-    get: vi.fn(async () => null),
-    set: vi.fn(async () => {}),
-    del: vi.fn(async () => {}),
+    get: vi.fn(async (key) => redisMemory.get(key) || null),
+    set: vi.fn(async (key, val) => { redisMemory.set(key, val); }),
+    del: vi.fn(async (key) => { redisMemory.delete(key); }),
     isOpen: true,
   })),
   getCachedPayment: vi.fn(async () => null),
   setCachedPayment: vi.fn(async () => {}),
   invalidatePaymentCache: vi.fn(async () => {}),
   getRedisClient: vi.fn(() => ({
+    get: vi.fn(async (key) => redisMemory.get(key) || null),
+    set: vi.fn(async (key, val, options) => { redisMemory.set(key, val); }),
     ping: vi.fn(async () => "PONG"),
     on: vi.fn(),
     sendCommand: vi.fn(async () => {}),
     isOpen: true,
   })),
+
+
+
   resetRedisClientForTests: vi.fn(),
   paymentCacheKey: (id) => `payment:status:${id}`,
   PAYMENT_STATUS_TTL: 2,
@@ -333,11 +351,24 @@ describe("Payment Lifecycle — Integration", () => {
 
   beforeEach(() => {
     resetStores();
+    redisMemory.clear();
     vi.clearAllMocks();
     mockFindMatchingPayment.mockResolvedValue(null);
+    mockGetNetworkFeeStats.mockResolvedValue({
+      network: "testnet",
+      horizonUrl: "https://horizon-testnet.stellar.org",
+      operationCount: 1,
+      lastLedgerBaseFee: 100,
+      recommendedFeeStroops: 100,
+      totalFeeStroops: 100,
+      totalFeeXlm: "0.0000100",
+      feeCharged: { mode: "100", p50: "100" },
+      maxFee: { mode: "100" },
+    });
     mockSendWebhook.mockResolvedValue({ ok: true, signed: true, status: 200 });
     nock.cleanAll();
   });
+
 
   // ═══════════════════════════════════════════════════════════════════════════
   // 1) Authentication
@@ -541,6 +572,37 @@ describe("Payment Lifecycle — Integration", () => {
         .set("x-api-key", MERCHANT_API_KEY);
 
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe("GET /api/network-fee", () => {
+    it("returns the current estimated Stellar network fee", async () => {
+      mockGetNetworkFeeStats.mockResolvedValueOnce({
+        network: "testnet",
+        horizonUrl: "https://horizon-testnet.stellar.org",
+        operationCount: 1,
+        lastLedgerBaseFee: 100,
+        recommendedFeeStroops: 125,
+        totalFeeStroops: 125,
+        totalFeeXlm: "0.0000125",
+        feeCharged: { mode: "125", p50: "120" },
+        maxFee: { mode: "125" },
+      });
+
+      const res = await request(app).get("/api/network-fee");
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        network_fee: {
+          network: "testnet",
+          horizon_url: "https://horizon-testnet.stellar.org",
+          operation_count: 1,
+          stroops: 125,
+          xlm: "0.0000125",
+          last_ledger_base_fee: 100,
+        },
+      });
+      expect(mockGetNetworkFeeStats).toHaveBeenCalledWith(1);
     });
   });
 
@@ -857,9 +919,10 @@ describe("Payment Lifecycle — Integration", () => {
         .set("Idempotency-Key", idempotencyKey)
         .send({ amount: 10, asset: "XLM", recipient: STELLAR_RECIPIENT });
 
-      // Duplicate should return 200 (cached), not 201
-      expect(second.status).toBe(200);
+      // Duplicate should return 201 (cached) as per new requirement
+      expect(second.status).toBe(201);
       expect(second.body.payment_id).toBe(first.body.payment_id);
+
     });
 
     it("creates separate payments for different Idempotency-Keys", async () => {

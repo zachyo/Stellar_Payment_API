@@ -12,6 +12,7 @@ import {
 } from "../lib/request-schemas.js";
 import { validateRequest } from "../lib/validation.js";
 import { createCreatePaymentRateLimit } from "../lib/create-payment-rate-limit.js";
+import { recaptchaMiddleware } from "../lib/recaptcha.js";
 import { sendWebhook } from "../lib/webhooks.js";
 import { sendReceiptEmail } from "../lib/email.js";
 import { renderReceiptEmail } from "../lib/email-templates.js";
@@ -32,7 +33,11 @@ import {
 } from "../lib/metrics.js";
 import { sanitizeMetadataMiddleware } from "../lib/sanitize-metadata.js";
 import { supabase } from "../lib/supabase.js";
-import { findMatchingPayment } from "../lib/stellar.js";
+import {
+  findMatchingPayment,
+  findStrictReceivePaths,
+  getNetworkFeeStats,
+} from "../lib/stellar.js";
 
 const createPaymentRateLimit = createCreatePaymentRateLimit();
 
@@ -61,9 +66,12 @@ function applyPaymentFilters(query, req) {
   }
   if (typeof search === "string" && search.trim().length > 0) {
     const term = search.trim().replaceAll(",", "\\,");
-    query = query.or(
-      `id.ilike.%${term}%,description.ilike.%${term}%,recipient.ilike.%${term}%`
-    );
+    let orQuery = `id.ilike.%${term}%,description.ilike.%${term}%,recipient.ilike.%${term}%`;
+    const numTerm = Number(term);
+    if (!isNaN(numTerm)) {
+      orQuery += `,amount.eq.${numTerm}`;
+    }
+    query = query.or(orQuery);
   }
   return query;
 }
@@ -260,7 +268,7 @@ function createPaymentsRouter({
     }
   }
 
-  router.post("/create-payment", createPaymentRateLimit, validateRequest({ body: paymentSessionZodSchema }), sanitizeMetadataMiddleware, createSession);
+  router.post("/create-payment", createPaymentRateLimit, recaptchaMiddleware(), validateRequest({ body: paymentSessionZodSchema }), sanitizeMetadataMiddleware, createSession);
   router.post("/sessions", createPaymentRateLimit, validateRequest({ body: paymentSessionZodSchema }), sanitizeMetadataMiddleware, createSession);
 
   /**
@@ -371,6 +379,24 @@ function createPaymentsRouter({
     streamManager.addClient(req.params.id, res);
   });
 
+  router.get("/network-fee", async (req, res, next) => {
+    try {
+      const fee = await getNetworkFeeStats(1);
+      res.json({
+        network_fee: {
+          network: fee.network,
+          horizon_url: fee.horizonUrl,
+          operation_count: fee.operationCount,
+          stroops: fee.totalFeeStroops,
+          xlm: fee.totalFeeXlm,
+          last_ledger_base_fee: fee.lastLedgerBaseFee,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   /**
    * @swagger
    * /api/verify-payment/{id}:
@@ -387,7 +413,7 @@ function createPaymentsRouter({
         let query = supabase
           .from("payments")
           .select(
-            "id, merchant_id, amount, asset, asset_issuer, recipient, status, tx_id, memo, memo_type, webhook_url, merchants(webhook_secret, webhook_version, notification_email, email)"
+            "id, merchant_id, amount, asset, asset_issuer, recipient, status, tx_id, memo, memo_type, webhook_url, merchants(webhook_secret, webhook_version, webhook_custom_headers, notification_email, email)"
           );
 
         if (req.merchant?.id) {
@@ -493,7 +519,9 @@ function createPaymentsRouter({
         const webhookResult = await sendWebhook(
           data.webhook_url,
           webhookPayload,
-          merchantSecret
+          merchantSecret,
+          data.id,
+          data.merchants?.webhook_custom_headers ?? {}
         );
 
         if (!webhookResult.ok && !webhookResult.skipped) {
