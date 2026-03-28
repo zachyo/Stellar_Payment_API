@@ -394,7 +394,6 @@ export default function PaymentPage() {
     useState<NetworkFeeResponse["network_fee"] | null>(null);
   const [networkFeeLoading, setNetworkFeeLoading] = useState(false);
   const [networkFeeError, setNetworkFeeError] = useState<string | null>(null);
-  const paymentStatus = payment?.status;
 
   useEffect(() => {
     if (
@@ -1096,6 +1095,15 @@ export default function PaymentPage() {
         qrValue={paymentIntentUri}
         paymentId={payment.id}
       />
+      <Modal
+        isOpen={isPayModalOpen}
+        onClose={() => {
+          if (!isProcessing) {
+            setIsPayModalOpen(false);
+          }
+        }}
+        title={t("reviewPaymentTitle")}
+      >
         <div className="flex flex-col gap-4">
           <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
             <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
