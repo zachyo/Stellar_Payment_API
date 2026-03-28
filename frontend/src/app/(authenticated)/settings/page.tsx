@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import CopyButton from "@/components/CopyButton";
 import toast from "react-hot-toast";
+import DangerZone from "@/components/DangerZone";
 import {
   useHydrateMerchantStore,
   useMerchantApiKey,
@@ -19,7 +20,7 @@ const DEFAULT_BRANDING = {
   background_color: "#050608",
 };
 
-type SettingsTab = "api" | "branding" | "webhooks";
+type SettingsTab = "api" | "branding" | "webhooks" | "danger";
 
 interface WebhookDomainVerification {
   status: "verified" | "unverified";
@@ -505,6 +506,16 @@ export default function SettingsPage() {
               }`}
           >
             Webhooks
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("danger")}
+            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium ${activeTab === "danger"
+                ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.4)]"
+                : "text-red-400/70 hover:bg-red-500/10"
+              }`}
+          >
+            Danger
           </button>
         </div>
 
@@ -1018,6 +1029,8 @@ export default function SettingsPage() {
             </section>
           </div>
         )}
+
+        {activeTab === "danger" && <DangerZone apiKey={apiKey} />}
       </div>
 
       {/* Footer nav */}
