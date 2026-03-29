@@ -37,6 +37,26 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang={locale} suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var theme = localStorage.getItem('merchant-theme-preference');
+                  var darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+                  var themeToApply = 'light';
+                  if (theme === 'dark' || ((!theme || theme === 'system') && darkQuery.matches)) {
+                    themeToApply = 'dark';
+                  }
+                  document.documentElement.classList.remove('light', 'dark');
+                  document.documentElement.classList.add(themeToApply);
+                } catch (e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
       <body className={`${spaceGrotesk.variable} ${spaceMono.variable} min-h-screen font-sans`}>
         <NextIntlClientProvider locale={locale} messages={messages}>
           <ThemeProvider>
