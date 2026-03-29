@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import PaymentMetrics from "@/components/PaymentMetrics";
+import AnalyticsCards from "@/components/AnalyticsCards";
+import ActivityFeed from "@/components/ActivityFeed";
 import WithdrawalModal from "@/components/WithdrawalModal";
 import DashboardSkeleton from "@/components/DashboardSkeleton";
 import Link from "next/link";
@@ -12,6 +13,7 @@ import {
 } from "@/lib/merchant-store";
 import { useTranslations } from "next-intl";
 import FirstApiKeyModal from "@/components/FirstApiKeyModal";
+import FirstPaymentCelebration from "@/components/FirstPaymentCelebration";
 
 export default function DashboardPage() {
   const t = useTranslations("dashboardPage");
@@ -58,25 +60,23 @@ export default function DashboardPage() {
         {/* Left Column: Metrics and Activity */}
         <div className="flex flex-col gap-10 lg:col-span-2">
           <section className="flex flex-col gap-4">
-            <h2 className="text-xl font-semibold text-white">
-              {t("paymentMetrics")}
-            </h2>
-            <PaymentMetrics showSkeleton={loading} />
+            <h2 className="text-xl font-semibold text-white">Business Overview</h2>
+            <AnalyticsCards />
           </section>
 
           <section className="flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold text-white">
-                {t("recentActivity")}
+                Recent Activity
               </h2>
               <Link
-                href="/payments"
+                href="/payment-history"
                 className="text-sm text-mint hover:text-glow"
               >
                 {t("viewAllPayments")} →
               </Link>
             </div>
-            {/* <RecentPayments showSkeleton={loading} /> */}
+            <ActivityFeed />
           </section>
         </div>
 
@@ -208,6 +208,8 @@ export default function DashboardPage() {
         isOpen={isFirstKeyModalOpen}
         onClose={() => setIsFirstKeyModalOpen(false)}
       />
+
+      <FirstPaymentCelebration />
     </div>
   );
 }

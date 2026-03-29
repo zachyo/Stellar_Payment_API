@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import CopyButton from "@/components/CopyButton";
 import toast from "react-hot-toast";
+import DangerZone from "@/components/DangerZone";
+import WebhookHealthIndicator from "@/components/WebhookHealthIndicator";
+import { EmailReceiptPreview } from "@/components/EmailReceiptPreview";
 import {
   useHydrateMerchantStore,
   useMerchantApiKey,
@@ -19,7 +22,17 @@ const DEFAULT_BRANDING = {
   background_color: "#050608",
 };
 
-type SettingsTab = "api" | "branding" | "webhooks";
+type SettingsTab = "api" | "branding" | "webhooks" | "danger";
+
+interface WebhookDomainVerification {
+  status: "verified" | "unverified";
+  domain: string | null;
+  verification_token: string | null;
+  verification_file_url: string | null;
+  checked_at: string | null;
+  verified_at: string | null;
+  failure_reason: string | null;
+}
 
 function normalizeHexInput(value: string) {
   const trimmed = value.trim();
@@ -31,9 +44,9 @@ function hexToRgb(hex: string) {
   const full =
     clean.length === 3
       ? clean
-        .split("")
-        .map((c) => `${c}${c}`)
-        .join("")
+          .split("")
+          .map((c) => `${c}${c}`)
+          .join("")
       : clean;
   const int = Number.parseInt(full, 16);
 
@@ -132,6 +145,7 @@ export default function SettingsPage() {
   const [brandingError, setBrandingError] = useState<string | null>(null);
   const [loadingBranding, setLoadingBranding] = useState(false);
   const [savingBranding, setSavingBranding] = useState(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   // Webhook state
   const [webhookUrl, setWebhookUrl] = useState("");
@@ -144,6 +158,10 @@ export default function SettingsPage() {
   const [regeneratingSecret, setRegeneratingSecret] = useState(false);
   const [confirmRegenSecret, setConfirmRegenSecret] = useState(false);
   const [webhookRevealedSecret, setWebhookRevealedSecret] = useState(false);
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [webhookVerification, setWebhookVerification] =
+    useState<WebhookDomainVerification | null>(null);
+  const [verifyingWebhookDomain, setVerifyingWebhookDomain] = useState(false);
 
   useHydrateMerchantStore();
 
@@ -226,7 +244,7 @@ export default function SettingsPage() {
     setBrandingError(null);
 
     for (const [key, color] of Object.entries(branding)) {
-      if (!HEX_COLOR_REGEX.test(color)) {
+      if (!HEX_COLOR_REGEX.test(color as string)) {
         setBrandingError(`${key} must be a valid hex color`);
         return;
       }
@@ -272,6 +290,7 @@ export default function SettingsPage() {
           throw new Error(data.error ?? "Failed to load webhook settings");
         setWebhookUrl(data.webhook_url ?? "");
         setWebhookSecretMasked(data.webhook_secret_masked ?? "");
+        setWebhookVerification(data.webhook_domain_verification ?? null);
       } catch (err: unknown) {
         const msg =
           err instanceof Error
@@ -326,6 +345,7 @@ export default function SettingsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save webhook URL");
       setWebhookUrl(data.webhook_url ?? "");
+      setWebhookVerification(data.webhook_domain_verification ?? null);
       toast.success(
         data.webhook_url ? "Webhook URL saved" : "Webhook URL cleared",
       );
@@ -336,6 +356,37 @@ export default function SettingsPage() {
       toast.error(msg);
     } finally {
       setSavingWebhook(false);
+    }
+  };
+
+  const verifyWebhookDomain = async () => {
+    if (!apiKey) return;
+
+    setVerifyingWebhookDomain(true);
+    setWebhookSaveError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/webhook-settings/verify`, {
+        method: "POST",
+        headers: { "x-api-key": apiKey },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to verify webhook domain");
+      }
+
+      setWebhookVerification(data.webhook_domain_verification ?? null);
+      toast.success(
+        data.webhook_domain_verification?.status === "verified"
+          ? "Webhook domain verified"
+          : "Webhook domain is still unverified",
+      );
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to verify webhook domain";
+      setWebhookSaveError(msg);
+      toast.error(msg);
+    } finally {
+      setVerifyingWebhookDomain(false);
     }
   };
 
@@ -362,6 +413,40 @@ export default function SettingsPage() {
       toast.error(msg);
     } finally {
       setRegeneratingSecret(false);
+    }
+  };
+
+  // ── Webhook: test endpoint ────────────────────────────────────────────────
+  const testWebhook = async () => {
+    if (!apiKey) return;
+    setTestingWebhook(true);
+    setWebhookSaveError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/webhooks/test`, {
+        method: "POST",
+        headers: { "x-api-key": apiKey },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Test webhook request failed");
+
+      const statusClass =
+        data.status >= 200 && data.status < 300
+          ? "text-green-400"
+          : "text-red-400";
+      toast.success(
+        <div className="flex flex-col">
+          <span>Test webhook sent!</span>
+          <span className="text-xs text-slate-400 mt-1">
+            Status: <span className={statusClass}>{data.status}</span>
+          </span>
+        </div>,
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to test webhook";
+      toast.error(msg);
+      setWebhookSaveError(msg);
+    } finally {
+      setTestingWebhook(false);
     }
   };
 
@@ -408,6 +493,10 @@ export default function SettingsPage() {
   );
   const lowContrastWarning =
     primaryOnBackground < 4.5 || secondaryOnBackground < 3;
+  const webhookStatusTone =
+    webhookVerification?.status === "verified"
+      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+      : "border-yellow-500/30 bg-yellow-500/10 text-yellow-200";
 
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-10 px-6 py-16">
@@ -429,32 +518,46 @@ export default function SettingsPage() {
           <button
             type="button"
             onClick={() => setActiveTab("api")}
-            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium ${activeTab === "api"
+            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium ${
+              activeTab === "api"
                 ? "bg-white text-black"
                 : "text-slate-300 hover:bg-white/10"
-              }`}
+            }`}
           >
             API Keys
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("branding")}
-            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium ${activeTab === "branding"
+            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium ${
+              activeTab === "branding"
                 ? "bg-white text-black"
                 : "text-slate-300 hover:bg-white/10"
-              }`}
+            }`}
           >
             Branding
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("webhooks")}
-            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium ${activeTab === "webhooks"
+            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium ${
+              activeTab === "webhooks"
                 ? "bg-white text-black"
                 : "text-slate-300 hover:bg-white/10"
-              }`}
+            }`}
           >
             Webhooks
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("danger")}
+            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium ${
+              activeTab === "danger"
+                ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.4)]"
+                : "text-red-400/70 hover:bg-red-500/10"
+            }`}
+          >
+            Danger
           </button>
         </div>
 
@@ -479,8 +582,9 @@ export default function SettingsPage() {
 
               <div className="flex items-center gap-2 overflow-hidden rounded-xl border border-white/10 bg-black/40 p-1 pl-4">
                 <code
-                  className={`flex-1 truncate font-mono text-sm transition-colors ${revealed ? "text-mint" : "text-slate-500"
-                    }`}
+                  className={`flex-1 truncate font-mono text-sm transition-colors ${
+                    revealed ? "text-mint" : "text-slate-500"
+                  }`}
                 >
                   {displayKey}
                 </code>
@@ -689,6 +793,34 @@ export default function SettingsPage() {
                   ? "Loading..."
                   : "Save Branding"}
             </button>
+
+            <button
+              type="button"
+              onClick={() => setIsPreviewOpen(true)}
+              disabled={!apiKey}
+              className="flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 font-semibold text-white transition-all hover:bg-white/10 disabled:opacity-50"
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                />
+              </svg>
+              Preview Receipt
+            </button>
           </section>
         )}
 
@@ -697,9 +829,25 @@ export default function SettingsPage() {
             {/* Webhook Endpoint section */}
             <section className="flex flex-col gap-4">
               <div className="flex flex-col gap-1">
-                <h2 className="text-xs font-medium uppercase tracking-wider text-slate-400">
-                  Webhook Endpoint
-                </h2>
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-xs font-medium uppercase tracking-wider text-slate-400">
+                    Webhook Endpoint
+                  </h2>
+                  <div className="flex items-center gap-3">
+                    {webhookUrl && (
+                      <WebhookHealthIndicator webhookUrl={webhookUrl} />
+                    )}
+                    {webhookUrl && (
+                      <span
+                        className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] ${webhookStatusTone}`}
+                      >
+                        {webhookVerification?.status === "verified"
+                          ? "Verified"
+                          : "Unverified"}
+                      </span>
+                    )}
+                  </div>
+                </div>
                 <p className="text-sm text-slate-500">
                   Events like payment confirmations will be sent as POST
                   requests to this URL. Must use HTTPS.
@@ -725,10 +873,11 @@ export default function SettingsPage() {
                   aria-describedby={
                     webhookUrlError ? "webhook-url-error" : undefined
                   }
-                  className={`w-full rounded-xl border bg-black/40 p-3 font-mono text-sm text-white placeholder-slate-600 outline-none transition-colors focus:ring-1 ${webhookUrlError
+                  className={`w-full rounded-xl border bg-black/40 p-3 font-mono text-sm text-white placeholder-slate-600 outline-none transition-colors focus:ring-1 ${
+                    webhookUrlError
                       ? "border-red-500/50 focus:border-red-500 focus:ring-red-500/30"
                       : "border-white/10 focus:border-mint/50 focus:ring-mint/20"
-                    }`}
+                  }`}
                 />
                 {webhookUrlError && (
                   <p
@@ -752,18 +901,103 @@ export default function SettingsPage() {
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={saveWebhookUrl}
-                disabled={savingWebhook || loadingWebhook || !!webhookUrlError}
-                className="h-11 rounded-xl bg-mint font-semibold text-black transition-all hover:bg-glow disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {savingWebhook
-                  ? "Saving…"
-                  : loadingWebhook
-                    ? "Loading…"
-                    : "Save Webhook URL"}
-              </button>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={saveWebhookUrl}
+                  disabled={
+                    savingWebhook || loadingWebhook || !!webhookUrlError
+                  }
+                  className="h-11 flex-1 rounded-xl bg-mint font-semibold text-black transition-all hover:bg-glow disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {savingWebhook
+                    ? "Saving…"
+                    : loadingWebhook
+                      ? "Loading…"
+                      : "Save Webhook URL"}
+                </button>
+                <button
+                  type="button"
+                  onClick={testWebhook}
+                  disabled={testingWebhook || !webhookUrl}
+                  className="h-11 flex-1 rounded-xl border border-white/10 bg-white/5 font-semibold text-white transition-all hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {testingWebhook ? "Testing…" : "Send Test Webhook"}
+                </button>
+              </div>
+
+              {webhookUrl && webhookVerification && (
+                <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                  <div className="flex flex-col gap-2">
+                    <p className="text-sm font-semibold text-white">
+                      Domain verification
+                    </p>
+                    <p className="text-sm text-slate-400">
+                      Host the token below at{" "}
+                      <code className="text-slate-300">
+                        {webhookVerification.verification_file_url}
+                      </code>{" "}
+                      and then verify the domain.
+                    </p>
+                  </div>
+
+                  <div className="mt-4 flex items-center gap-2 overflow-hidden rounded-xl border border-white/10 bg-black/40 p-1 pl-4">
+                    <code className="flex-1 truncate font-mono text-sm text-slate-300">
+                      {webhookVerification.verification_token ?? "—"}
+                    </code>
+                    {webhookVerification.verification_token && (
+                      <CopyButton
+                        text={webhookVerification.verification_token}
+                      />
+                    )}
+                  </div>
+
+                  <div className="mt-4 flex flex-col gap-2 text-xs text-slate-500">
+                    <p>
+                      Domain:{" "}
+                      <span className="font-mono text-slate-300">
+                        {webhookVerification.domain ?? "—"}
+                      </span>
+                    </p>
+                    {webhookVerification.checked_at && (
+                      <p>
+                        Last checked:{" "}
+                        <span className="text-slate-300">
+                          {new Date(
+                            webhookVerification.checked_at,
+                          ).toLocaleString()}
+                        </span>
+                      </p>
+                    )}
+                    {webhookVerification.verified_at && (
+                      <p>
+                        Verified at:{" "}
+                        <span className="text-slate-300">
+                          {new Date(
+                            webhookVerification.verified_at,
+                          ).toLocaleString()}
+                        </span>
+                      </p>
+                    )}
+                    {webhookVerification.failure_reason && (
+                      <p className="text-red-400">
+                        {webhookVerification.failure_reason}
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={verifyWebhookDomain}
+                    disabled={
+                      savingWebhook || loadingWebhook || verifyingWebhookDomain
+                    }
+                    className="mt-4 h-11 rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {verifyingWebhookDomain ? "Verifying…" : "Verify Domain"}
+                  </button>
+                </div>
+              )}
             </section>
 
             {/* Divider */}
@@ -886,7 +1120,17 @@ export default function SettingsPage() {
             </section>
           </div>
         )}
+
+        {activeTab === "danger" && <DangerZone apiKey={apiKey} />}
       </div>
+
+      <EmailReceiptPreview
+        isOpen={isPreviewOpen}
+        onClose={() => setIsPreviewOpen(false)}
+        branding={branding}
+        apiKey={apiKey}
+        apiUrl={API_URL}
+      />
 
       {/* Footer nav */}
       <footer className="flex justify-center gap-6 text-xs text-slate-500">

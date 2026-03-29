@@ -5,7 +5,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import Skeleton from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
+import toast from "react-hot-toast";
 import PaymentDetailModal from "@/components/PaymentDetailModal";
+import PaymentDetailsSheet from "@/components/PaymentDetailsSheet";
 import ExportCsvButton from "@/components/ExportCsvButton";
 import { localeToLanguageTag } from "@/i18n/config";
 import {
@@ -180,6 +182,7 @@ export default function RecentPayments({
   const [totalCount, setTotalCount] = useState(0);
   const [selectedPayment, setSelectedPayment] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [flashedIds, setFlashedIds] = useState<Set<string>>(new Set());
 
   const updateFilters = useCallback(
@@ -355,7 +358,7 @@ export default function RecentPayments({
 
   const handlePaymentClick = (paymentId: string) => {
     setSelectedPayment(paymentId);
-    setIsModalOpen(true);
+    setIsSheetOpen(true);
   };
 
   const handleDownloadCSV = () => {
@@ -381,6 +384,26 @@ export default function RecentPayments({
   const closeModal = () => {
     setIsModalOpen(false);
     setSelectedPayment(null);
+  };
+
+  const closeSheet = () => {
+    setIsSheetOpen(false);
+    setSelectedPayment(null);
+  };
+
+  const handleCopyId = async (id: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(id);
+    } catch {
+      const el = document.createElement("textarea");
+      el.value = id;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    toast.success("Intent ID copied to clipboard");
   };
 
   if (showSkeleton || loading) {
@@ -1003,7 +1026,27 @@ export default function RecentPayments({
                     </span>
                   </td>
                   <td className="px-4 py-3 font-medium text-white">
-                    {payment.amount} {payment.asset}
+                    <span className="inline-flex items-center gap-1.5">
+                      {payment.amount} {payment.asset}
+                      <button
+                        onClick={(event) => handleCopyId(payment.id, event)}
+                        className="text-slate-500 transition-colors hover:text-mint"
+                        aria-label="Copy intent ID"
+                        title={`Copy ${payment.id}`}
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-3.5 w-3.5"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                      </button>
+                    </span>
                   </td>
                   <td className="hidden px-4 py-3 text-slate-400 sm:table-cell">
                     <code className="font-mono text-xs text-slate-300">
@@ -1077,6 +1120,12 @@ export default function RecentPayments({
         paymentId={selectedPayment}
         isOpen={isModalOpen}
         onClose={closeModal}
+      />
+
+      <PaymentDetailsSheet
+        paymentId={selectedPayment}
+        isOpen={isSheetOpen}
+        onClose={closeSheet}
       />
     </div>
   );
