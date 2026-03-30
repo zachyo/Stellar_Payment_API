@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface InfoTooltipProps {
-  content: string;
+  content: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }
@@ -20,7 +20,7 @@ export function InfoTooltip({ content, children, className = "" }: InfoTooltipPr
       onFocus={() => setIsVisible(true)}
       onBlur={() => setIsVisible(false)}
     >
-      <span className="cursor-help border-b border-dotted border-white/30 decoration-white/30 transition-colors hover:border-mint hover:text-mint">
+      <span className="cursor-help border-b border-dotted border-white/30 decoration-white/30 transition-colors hover:border-mint hover:text-mint focus-visible:text-mint">
         {children}
       </span>
 
@@ -31,7 +31,7 @@ export function InfoTooltip({ content, children, className = "" }: InfoTooltipPr
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 5 }}
             transition={{ duration: 0.15, ease: "easeOut" }}
-            className="absolute bottom-full left-1/2 z-[100] mb-2 w-48 -translate-x-1/2 rounded-lg border border-white/10 bg-[#16171a] p-2.5 text-xs leading-relaxed text-slate-300 shadow-2xl backdrop-blur-md"
+            className="absolute bottom-full left-1/2 z-[100] mb-2 w-64 -translate-x-1/2 rounded-lg border border-white/10 bg-[#16171a] p-2.5 text-xs leading-relaxed text-slate-200 shadow-2xl backdrop-blur-md"
           >
             {content}
             {/* Arrow */}
